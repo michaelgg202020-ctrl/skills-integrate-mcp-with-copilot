@@ -3,6 +3,51 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const loginForm = document.getElementById("login-form");
+  const registerForm = document.getElementById("register-form");
+  const toggleRegister = document.getElementById("toggle-register");
+  const logoutButton = document.getElementById("logout-button");
+  const currentUserDiv = document.getElementById("current-user");
+  const authMessage = document.getElementById("auth-message");
+  let accessToken = localStorage.getItem("accessToken");
+  let currentUser = null;
+
+  function authHeaders() {
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  }
+
+  function showAuthMessage(text, type = "error") {
+    authMessage.textContent = text;
+    authMessage.className = type;
+  }
+
+  function renderAuthState() {
+    const authenticated = Boolean(accessToken && currentUser);
+    loginForm.classList.toggle("hidden", authenticated);
+    registerForm.classList.toggle("hidden", authenticated || !registerForm.classList.contains("show"));
+    toggleRegister.classList.toggle("hidden", authenticated);
+    logoutButton.classList.toggle("hidden", !authenticated);
+    currentUserDiv.classList.toggle("hidden", !authenticated);
+    if (authenticated) {
+      currentUserDiv.textContent = `${currentUser.name} (${currentUser.role})`;
+    }
+    signupForm.querySelector("button").disabled = !authenticated;
+  }
+
+  async function loadCurrentUser() {
+    if (!accessToken) {
+      renderAuthState();
+      return;
+    }
+    const response = await fetch("/auth/me", { headers: authHeaders() });
+    if (response.ok) {
+      currentUser = await response.json();
+    } else {
+      accessToken = null;
+      localStorage.removeItem("accessToken");
+    }
+    renderAuthState();
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -80,6 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: authHeaders(),
         }
       );
 
@@ -124,6 +170,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(email)}`,
         {
           method: "POST",
+          headers: authHeaders(),
         }
       );
 
@@ -155,6 +202,68 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: document.getElementById("login-email").value,
+        password: document.getElementById("login-password").value,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      showAuthMessage(result.detail || "Unable to log in");
+      return;
+    }
+    accessToken = result.access_token;
+    currentUser = result.user;
+    localStorage.setItem("accessToken", accessToken);
+    showAuthMessage("Logged in", "success");
+    renderAuthState();
+  });
+
+  registerForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const response = await fetch("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: document.getElementById("register-name").value,
+        email: document.getElementById("register-email").value,
+        password: document.getElementById("register-password").value,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      showAuthMessage(result.detail || "Unable to create account");
+      return;
+    }
+    registerForm.classList.remove("show");
+    registerForm.classList.add("hidden");
+    loginForm.classList.remove("hidden");
+    showAuthMessage("Account created. Please log in.", "success");
+  });
+
+  toggleRegister.addEventListener("click", () => {
+    registerForm.classList.toggle("show");
+    registerForm.classList.toggle("hidden");
+    toggleRegister.textContent = registerForm.classList.contains("show")
+      ? "Use existing account"
+      : "Create an account";
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST", headers: authHeaders() });
+    accessToken = null;
+    currentUser = null;
+    localStorage.removeItem("accessToken");
+    showAuthMessage("Logged out", "success");
+    renderAuthState();
+  });
+
   // Initialize app
+  loadCurrentUser();
   fetchActivities();
 });
